@@ -14,9 +14,7 @@ const elements = {
     forecastContainer: document.getElementById('forecastContainer'),
     currentTime: document.getElementById('currentTime'),
     currentDate: document.getElementById('currentDate')
-}
-
-    ;
+};
 
 // Weather data elements
 const weatherElements = {
@@ -32,9 +30,7 @@ const weatherElements = {
     cloudiness: document.getElementById('cloudiness'),
     uvIndex: document.getElementById('uvIndex'),
     windDirection: document.getElementById('windDirection')
-}
-
-    ;
+};
 
 // Weather icon mapping
 const weatherIcons = {
@@ -46,8 +42,8 @@ const weatherIcons = {
     '03n': 'fas fa-cloud', // scattered clouds
     '04d': 'fas fa-cloud', // broken clouds
     '04n': 'fas fa-cloud', // broken clouds
-    '09d': 'fas fa-cloud-rain', // shower rain
-    '09n': 'fas fa-cloud-rain', // shower rain
+    '09d': 'fas fa-cloud-showers-heavy', // shower rain
+    '09n': 'fas fa-cloud-showers-heavy', // shower rain
     '10d': 'fas fa-cloud-sun-rain', // rain day
     '10n': 'fas fa-cloud-moon-rain', // rain night
     '11d': 'fas fa-bolt', // thunderstorm
@@ -56,9 +52,7 @@ const weatherIcons = {
     '13n': 'fas fa-snowflake', // snow
     '50d': 'fas fa-smog', // mist
     '50n': 'fas fa-smog' // mist
-}
-
-    ;
+};
 
 // Initialize app
 class WeatherApp {
@@ -82,6 +76,12 @@ class WeatherApp {
 
         elements.cityInput.addEventListener('keypress', (e) => {
             if (e.key === 'Enter') this.handleSearch();
+        });
+
+        // Add input validation
+        elements.cityInput.addEventListener('input', (e) => {
+            // Remove any numbers from input
+            e.target.value = e.target.value.replace(/[0-9]/g, '');
         });
     }
 
@@ -110,6 +110,12 @@ class WeatherApp {
             return;
         }
 
+        // Validate city name contains only letters and spaces
+        if (!/^[a-zA-Z\s]+$/.test(city)) {
+            this.showError('Please enter a valid city name (letters and spaces only)');
+            return;
+        }
+
         await this.getWeatherData(city);
     }
 
@@ -121,21 +127,35 @@ class WeatherApp {
 
         this.setLoading(true);
 
-        navigator.geolocation.getCurrentPosition(async (position) => {
-            const {
-                latitude, longitude
-            }
-
-                = position.coords;
-            await this.getWeatherByCoords(latitude, longitude);
-        }
-
-            ,
+        navigator.geolocation.getCurrentPosition(
+            async (position) => {
+                const { latitude, longitude } = position.coords;
+                await this.getWeatherByCoords(latitude, longitude);
+            },
             (error) => {
                 this.setLoading(false);
-                this.showError('Unable to retrieve your location');
+                let errorMessage = 'Unable to retrieve your location';
+
+                switch (error.code) {
+                    case error.PERMISSION_DENIED:
+                        errorMessage = 'Location access denied. Please allow location access to use this feature.';
+                        break;
+                    case error.POSITION_UNAVAILABLE:
+                        errorMessage = 'Location information is unavailable.';
+                        break;
+                    case error.TIMEOUT:
+                        errorMessage = 'Location request timed out.';
+                        break;
+                }
+
+                this.showError(errorMessage);
                 console.error('Geolocation error:', error);
-            });
+            },
+            {
+                timeout: 10000,
+                enableHighAccuracy: true
+            }
+        );
     }
 
     async getWeatherData(city) {
@@ -143,21 +163,18 @@ class WeatherApp {
         this.hideError();
 
         try {
-            const [currentWeather,
-                forecast] = await Promise.all([this.fetchCurrentWeather(city),
-                this.fetchForecast(city)]);
+            const [currentWeather, forecast] = await Promise.all([
+                this.fetchCurrentWeather(city),
+                this.fetchForecast(city)
+            ]);
 
             this.displayWeatherData(currentWeather);
             this.displayForecastData(forecast);
             this.saveLastCity(city);
 
-        }
-
-        catch (error) {
+        } catch (error) {
             this.showError(error.message);
-        }
-
-        finally {
+        } finally {
             this.setLoading(false);
         }
     }
@@ -167,70 +184,41 @@ class WeatherApp {
         this.hideError();
 
         try {
-            const [currentWeather,
-                forecast] = await Promise.all([this.fetchWeatherByCoords(lat, lon),
-                this.fetchForecastByCoords(lat, lon)]);
+            const [currentWeather, forecast] = await Promise.all([
+                this.fetchWeatherByCoords(lat, lon),
+                this.fetchForecastByCoords(lat, lon)
+            ]);
 
             this.displayWeatherData(currentWeather);
             this.displayForecastData(forecast);
             elements.cityInput.value = currentWeather.name;
             this.saveLastCity(currentWeather.name);
 
-        }
-
-        catch (error) {
+        } catch (error) {
             this.showError(error.message);
-        }
-
-        finally {
+        } finally {
             this.setLoading(false);
         }
     }
 
     async fetchCurrentWeather(city) {
-        const response = await fetch(`$ {
-            BASE_URL
-        }
-
-        /weather?q=$ {
-            city
-        }
-
-        &units=$ {
-            this.currentUnit
-        }
-
-        &appid=$ {
-            API_KEY
-        }
-
-        `);
+        const response = await fetch(`${BASE_URL}/weather?q=${city}&units=${this.currentUnit}&appid=${API_KEY}`);
 
         if (!response.ok) {
-            throw new Error('City not found. Please check the spelling.');
+            if (response.status === 404) {
+                throw new Error('City not found. Please check the spelling and try again.');
+            } else if (response.status === 401) {
+                throw new Error('API key error. Please try again later.');
+            } else {
+                throw new Error('Unable to fetch weather data. Please try again.');
+            }
         }
 
         return await response.json();
     }
 
     async fetchForecast(city) {
-        const response = await fetch(`$ {
-            BASE_URL
-        }
-
-        /forecast?q=$ {
-            city
-        }
-
-        &units=$ {
-            this.currentUnit
-        }
-
-        &appid=$ {
-            API_KEY
-        }
-
-        `);
+        const response = await fetch(`${BASE_URL}/forecast?q=${city}&units=${this.currentUnit}&appid=${API_KEY}`);
 
         if (!response.ok) {
             throw new Error('Unable to fetch forecast data');
@@ -240,27 +228,7 @@ class WeatherApp {
     }
 
     async fetchWeatherByCoords(lat, lon) {
-        const response = await fetch(`$ {
-            BASE_URL
-        }
-
-        /weather?lat=$ {
-            lat
-        }
-
-        &lon=$ {
-            lon
-        }
-
-        &units=$ {
-            this.currentUnit
-        }
-
-        &appid=$ {
-            API_KEY
-        }
-
-        `);
+        const response = await fetch(`${BASE_URL}/weather?lat=${lat}&lon=${lon}&units=${this.currentUnit}&appid=${API_KEY}`);
 
         if (!response.ok) {
             throw new Error('Unable to fetch weather data for your location');
@@ -270,27 +238,7 @@ class WeatherApp {
     }
 
     async fetchForecastByCoords(lat, lon) {
-        const response = await fetch(`$ {
-            BASE_URL
-        }
-
-        /forecast?lat=$ {
-            lat
-        }
-
-        &lon=$ {
-            lon
-        }
-
-        &units=$ {
-            this.currentUnit
-        }
-
-        &appid=$ {
-            API_KEY
-        }
-
-        `);
+        const response = await fetch(`${BASE_URL}/forecast?lat=${lat}&lon=${lon}&units=${this.currentUnit}&appid=${API_KEY}`);
 
         if (!response.ok) {
             throw new Error('Unable to fetch forecast data for your location');
@@ -300,72 +248,30 @@ class WeatherApp {
     }
 
     displayWeatherData(data) {
-
         // Update main weather information
-        weatherElements.cityName.textContent = `$ {
-        data.name
-    }
-
-    ,
-    $ {
-        data.sys.country
-    }
-
-    `;
-
-        weatherElements.temperature.textContent = `$ {
-        Math.round(data.main.temp)
-    }
-
-    °C`;
+        weatherElements.cityName.textContent = `${data.name}, ${data.sys.country}`;
+        weatherElements.temperature.textContent = `${Math.round(data.main.temp)}°C`;
         weatherElements.description.textContent = data.weather[0].description;
 
         // Update weather icon
-        const iconClass = weatherIcons[data.weather[0].icon] || 'fas fa-cloud';
+        const iconCode = data.weather[0].icon;
+        const iconClass = weatherIcons[iconCode] || 'fas fa-cloud';
         weatherElements.weatherIcon.innerHTML = `<i class="${iconClass}"></i>`;
 
         // Update weather stats
-        weatherElements.feelsLike.textContent = `$ {
-        Math.round(data.main.feels_like)
-    }
+        weatherElements.feelsLike.textContent = `${Math.round(data.main.feels_like)}°C`;
+        weatherElements.humidity.textContent = `${data.main.humidity}%`;
+        weatherElements.windSpeed.textContent = `${Math.round(data.wind.speed * 3.6)} km/h`;
+        weatherElements.pressure.textContent = `${data.main.pressure} hPa`;
+        weatherElements.visibility.textContent = `${(data.visibility / 1000).toFixed(1)} km`;
+        weatherElements.cloudiness.textContent = `${data.clouds.all}%`;
 
-    °C`;
+        // Get wind direction
+        const windDirection = getWindDirection(data.wind.deg || 0);
+        weatherElements.windDirection.textContent = `${windDirection} (${data.wind.deg || 0}°)`;
 
-        weatherElements.humidity.textContent = `$ {
-        data.main.humidity
-    }
-
-    %`;
-
-        weatherElements.windSpeed.textContent = `$ {
-        Math.round(data.wind.speed * 3.6)
-    }
-
-    km/h`;
-
-        weatherElements.pressure.textContent = `$ {
-        data.main.pressure
-    }
-
-    hPa`;
-
-        weatherElements.visibility.textContent = `$ {
-        (data.visibility / 1000).toFixed(1)
-    }
-
-    km`;
-
-        weatherElements.cloudiness.textContent = `$ {
-        data.clouds.all
-    }
-
-    %`;
-
-        weatherElements.windDirection.textContent = `$ {
-        data.wind.deg || 0
-    }
-
-    °`;
+        // Set a default UV index (OpenWeatherMap doesn't provide this in the free tier)
+        weatherElements.uvIndex.textContent = 'N/A';
 
         // Show weather display with animation
         elements.weatherDisplay.style.display = 'block';
@@ -374,9 +280,7 @@ class WeatherApp {
         // Remove animation class after it completes
         setTimeout(() => {
             elements.weatherDisplay.classList.remove('fade-in');
-        }
-
-            , 500);
+        }, 500);
     }
 
     displayForecastData(data) {
@@ -385,7 +289,12 @@ class WeatherApp {
         // Get daily forecasts (one per day at 12:00)
         const dailyForecasts = data.list.filter(item => item.dt_txt.includes('12:00:00')).slice(0, 5);
 
-        dailyForecasts.forEach(forecast => {
+        if (dailyForecasts.length === 0) {
+            // If no 12:00 forecasts, take the first 5 entries
+            dailyForecasts.push(...data.list.slice(0, 5));
+        }
+
+        dailyForecasts.forEach((forecast, index) => {
             const date = new Date(forecast.dt * 1000);
 
             const dayName = date.toLocaleDateString('en-US', {
@@ -393,31 +302,24 @@ class WeatherApp {
             });
 
             const dateStr = date.toLocaleDateString('en-US', {
-                month: 'short', day: 'numeric'
+                month: 'short',
+                day: 'numeric'
             });
 
             const iconClass = weatherIcons[forecast.weather[0].icon] || 'fas fa-cloud';
 
             const forecastItem = document.createElement('div');
             forecastItem.className = 'forecast-item fade-in';
+            // Add delay for staggered animation
+            forecastItem.style.animationDelay = `${index * 0.1}s`;
 
-            forecastItem.innerHTML = ` <div class="forecast-day" >$ {
-        dayName
-    }
-
-    </div> <div class="forecast-date" >$ {
-        dateStr
-    }
-
-    </div> <div class="forecast-icon" ><i class="${iconClass}" ></i></div> <div class="forecast-temp" >$ {
-        Math.round(forecast.main.temp)
-    }
-
-    °C</div> <div class="forecast-desc" >$ {
-        forecast.weather[0].description
-    }
-
-    </div> `;
+            forecastItem.innerHTML = `
+                <div class="forecast-day">${dayName}</div>
+                <div class="forecast-date">${dateStr}</div>
+                <div class="forecast-icon"><i class="${iconClass}"></i></div>
+                <div class="forecast-temp">${Math.round(forecast.main.temp)}°C</div>
+                <div class="forecast-desc">${forecast.weather[0].description}</div>
+            `;
 
             elements.forecastContainer.appendChild(forecastItem);
         });
@@ -431,9 +333,7 @@ class WeatherApp {
             elements.loadingSpinner.style.display = 'block';
             elements.weatherDisplay.style.display = 'none';
             elements.forecastSection.style.display = 'none';
-        }
-
-        else {
+        } else {
             elements.loadingSpinner.style.display = 'none';
         }
     }
@@ -443,6 +343,11 @@ class WeatherApp {
         elements.errorMessage.style.display = 'flex';
         elements.weatherDisplay.style.display = 'none';
         elements.forecastSection.style.display = 'none';
+
+        // Auto-hide error after 5 seconds
+        setTimeout(() => {
+            this.hideError();
+        }, 5000);
     }
 
     hideError() {
@@ -459,9 +364,7 @@ class WeatherApp {
         if (lastCity) {
             elements.cityInput.value = lastCity;
             this.getWeatherData(lastCity);
-        }
-
-        else {
+        } else {
             // Default city
             this.getWeatherData('London');
         }
@@ -475,14 +378,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // Utility function for wind direction
 function getWindDirection(degrees) {
-    const directions = ['N',
-        'NE',
-        'E',
-        'SE',
-        'S',
-        'SW',
-        'W',
-        'NW'];
-    const index = Math.round(degrees / 45) % 8;
+    const directions = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW'];
+    const index = Math.round(degrees / 22.5) % 16;
     return directions[index];
 }
+
+// Add error handling for uncaught errors
+window.addEventListener('error', (event) => {
+    console.error('Global error:', event.error);
+});
